@@ -17,29 +17,29 @@ private:
     uint64_t frontIdx_;
     uint64_t backIdx_;
 
-    bool full_;
-    bool empty_;
+    bool full_ = false;
+    bool empty_ = true;
 
     // 34****12
     //  |    |
     //  b    f
 
 public:
-    ClassicBQueue() = default;
+    ClassicBQueue(): ClassicBQueue(32) {};
     ClassicBQueue(uint64_t size): buffer_(size), frontIdx_(0), backIdx_(0) {
     }
 
     // Some producer sends the data to the queue
     // Then condProd_ waits while buffer is full or skips waiting if it's not full
     // Then it pushes data to the end of the queue (if backIdx_ overtakes frontIdx then the queue is full)
-    void push(const T& data) {
+    void push(T&& task) {
         std::unique_lock<std::mutex> lk{mut_};
 
         condProd_.wait(lk, [this] {
             return !full_;
         });
 
-        buffer_[backIdx_] = data;
+        buffer_[backIdx_] = std::move(task);
         backIdx_ = (backIdx_ + 1) % buffer_.size();
 
         if (backIdx_ == frontIdx_) {

@@ -1,5 +1,5 @@
 #include "../lib/include/classic_b_queue.hpp"
-#include "../lib/include/producer_pool.hpp"
+#include "../lib/include/thread_pool.hpp"
 
 int main() {
 #if __cplusplus >= 201703L
@@ -10,5 +10,10 @@ int main() {
 
     ClassicBQueue<Task> queue;
 
-    ProducerPool<Task> pool(2, 100, queue);
+    ProducerPool<Task> pool(1, 100, queue);
+
+    pool.start();
+
+
+
 }

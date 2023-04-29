@@ -12,20 +12,20 @@ std::map<TaskSize, std::chrono::nanoseconds> dur = {
 };
 
 template <typename T>
-class movable_function;
+class TaskBase;
 
 template <typename R, typename... Args>
-class movable_function<R(Args...)> {
+class TaskBase<R(Args...)> {
     std::unique_ptr<void, void (*)(void*)> ptr{nullptr, +[](void*) {}};
     R (*invoke)(void*, Args...) = nullptr;
 
 public:
-    movable_function() = default;
-    movable_function(movable_function&&) = default;
-    movable_function& operator=(movable_function&&) = default;
+    TaskBase() = default;
+    TaskBase(TaskBase&&) = default;
+    TaskBase& operator=(TaskBase&&) = default;
 
     template <typename F>
-    movable_function(F&& f) {
+    TaskBase(F&& f) {
         auto pf = std::make_unique<F>(std::move(f));
         invoke = +[](void* pf, Args&&... args) -> R {
             F* f = reinterpret_cast<F*>(pf);
@@ -53,32 +53,20 @@ public:
     }
 };
 
-class Task {
-private:
-    movable_function<int()> task_;
-    std::future<int> future_;
+using Task = TaskBase<int()>;
 
-public:
-    Task() = default;
+template <typename Func, typename... Args>
+auto createTask(Func func, Args&&... args) {
+    std::packaged_task<std::remove_pointer_t<Func>> tsk{func};
+    auto fut = tsk.get_future();
+    Task t{[ct = std::move(tsk), args = std::make_tuple(std::forward<Args>(args)...)]() mutable {
+        std::apply(
+                [ct = std::move(ct)](auto&&... args) mutable {
+                    ct(args...);
+                },
+                std::move(args));
+        return 0;
+    }};
 
-    Task(movable_function<int()>&& task, std::future<int>&& future)
-            : task_(std::move(task)), future_(std::move(future)) {
-    }
-
-    template <typename Func, typename... Args>
-    static Task createTask(Func func, Args&&... args) {
-        std::packaged_task<std::remove_pointer_t<Func>> tsk{func};
-        auto fut = tsk.get_future();
-        movable_function<int()> t{[ct = std::move(tsk),
-                            args = std::make_tuple(std::forward<Args>(args)...)]() mutable {
-            std::apply(
-                    [ct = std::move(ct)](auto&&... args) mutable {
-                        ct(args...);
-                    },
-                    std::move(args));
-            return 0;
-        }};
-
-        return Task(std::move(t), std::move(fut));
-    }
-};
+    return std::make_pair(std::move(t), std::move(fut));
+}

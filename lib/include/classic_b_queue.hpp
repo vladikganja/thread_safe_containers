@@ -6,7 +6,7 @@
 template <typename T>
 class ClassicBQueue {
 private:
-    uint64_t size_;
+    uint64_t size_{};
 
     mutable std::mutex mut_;
     std::condition_variable condProd_;
@@ -14,11 +14,12 @@ private:
 
     std::vector<T> buffer_;
 
-    uint64_t frontIdx_;
-    uint64_t backIdx_;
+    uint64_t frontIdx_{};
+    uint64_t backIdx_{};
 
     bool full_ = false;
     bool empty_ = true;
+    bool done_ = false;
 
     // 34****12
     //  |    |
@@ -26,7 +27,7 @@ private:
 
 public:
     ClassicBQueue(): ClassicBQueue(32) {};
-    ClassicBQueue(uint64_t size): buffer_(size), frontIdx_(0), backIdx_(0) {
+    ClassicBQueue(uint64_t size): buffer_(size) {
     }
 
     // Some producer sends the data to the queue
@@ -42,41 +43,55 @@ public:
         buffer_[backIdx_] = std::move(task);
         backIdx_ = (backIdx_ + 1) % buffer_.size();
 
-        if (backIdx_ == frontIdx_) {
+        size_++;
+        if (size_ == buffer_.size()) {
             full_ = true;
-        } else {
-            full_ = false;
         }
+        empty_ = false;
 
         lk.unlock();
         condCons_.notify_one();
     }
 
-
-    bool try_pop(T& data) {
+    bool pop(T& data) {
+        INFO("pop");
         std::unique_lock<std::mutex> lk{mut_};
 
+        INFO("wait");
         condCons_.wait(lk, [this] {
-            return !empty_;
+            std::cout << empty_ << "\n";
+            return !empty_ || done_;
         });
 
+        INFO("next");
+        std::this_thread::sleep_for(10ms);
         if (empty_) {
             return false;
         }
 
-        data = buffer_[frontIdx_];
+        data = std::move(buffer_[frontIdx_]);
         frontIdx_ = (frontIdx_ + 1) % buffer_.size();
 
-        if (frontIdx_ == backIdx_) {
+        size_--;
+        if (size_ == 0) {
             empty_ = true;
-        } else {
-            empty_ = false;
         }
+        full_ = false;
 
         lk.unlock();
         condProd_.notify_one();
         return true;
     }
 
+    void wake_and_done() {
+        std::unique_lock<std::mutex> guard{mut_};
+        done_ = true;
+        guard.unlock();
+        condCons_.notify_all();
+    }
 
+    bool is_empty_and_done() const {
+        std::unique_lock<std::mutex> Lk{mut_};
+        return empty_ && done_;
+    }
 };

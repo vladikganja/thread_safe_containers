@@ -16,3 +16,14 @@
 #include <memory>
 #include <future>
 #include <iostream>
+#include <sstream>
+
+using namespace std::chrono_literals;
+
+inline void INFO(const std::string& str = "") {
+    auto myid = std::this_thread::get_id();
+    std::stringstream ss;
+    ss << myid;
+    std::string info = "info: threadID = " + ss.str() + "; " + str + "\n";
+    std::cout << info;
+}

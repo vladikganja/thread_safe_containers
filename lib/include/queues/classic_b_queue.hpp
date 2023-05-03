@@ -1,9 +1,9 @@
 #pragma once
 
-#include "common.h"
+#include <lib/include/common/task.hpp>
 
 // lock-based bounded queue. One buffer implementation
-template <typename T>
+template <typename TaskT>
 class ClassicBQueue {
 private:
     uint64_t size_{};
@@ -12,10 +12,10 @@ private:
     std::condition_variable condProd_;
     std::condition_variable condCons_;
 
-    std::vector<T> buffer_;
+    std::vector<TaskT> buffer_;
 
-    uint64_t frontIdx_{};
-    uint64_t backIdx_{};
+    uint64_t dequeuePos_{};
+    uint64_t enqueuePos_{};
 
     bool full_ = false;
     bool empty_ = true;
@@ -32,16 +32,16 @@ public:
 
     // Some producer sends the data to the queue
     // Then condProd_ waits while buffer is full or skips waiting if it's not full
-    // Then it pushes data to the end of the queue (if backIdx_ overtakes frontIdx then the queue is full)
-    void push(T&& task) {
-        std::unique_lock<std::mutex> lk{mut_};
+    // Then it pushes data to the end of the queue (if enqueuePos_ overtakes frontIdx then the queue is full)
+    void enqueue(TaskT&& task) {
+        std::unique_lock<std::mutex> guard{mut_};
 
-        condProd_.wait(lk, [this] {
+        condProd_.wait(guard, [this] {
             return !full_;
         });
 
-        buffer_[backIdx_] = std::move(task);
-        backIdx_ = (backIdx_ + 1) % buffer_.size();
+        buffer_[enqueuePos_] = std::move(task);
+        enqueuePos_ = (enqueuePos_ + 1) % buffer_.size();
 
         size_++;
         if (size_ == buffer_.size()) {
@@ -49,28 +49,23 @@ public:
         }
         empty_ = false;
 
-        lk.unlock();
+        guard.unlock();
         condCons_.notify_one();
     }
 
-    bool pop(T& data) {
-        INFO("pop");
-        std::unique_lock<std::mutex> lk{mut_};
+    bool dequeue(TaskT& task) {
+        std::unique_lock<std::mutex> guard{mut_};
 
-        INFO("wait");
-        condCons_.wait(lk, [this] {
-            std::cout << empty_ << "\n";
+        condCons_.wait(guard, [this] {
             return !empty_ || done_;
         });
 
-        INFO("next");
-        std::this_thread::sleep_for(10ms);
         if (empty_) {
             return false;
         }
 
-        data = std::move(buffer_[frontIdx_]);
-        frontIdx_ = (frontIdx_ + 1) % buffer_.size();
+        task = std::move(buffer_[dequeuePos_]);
+        dequeuePos_ = (dequeuePos_ + 1) % buffer_.size();
 
         size_--;
         if (size_ == 0) {
@@ -78,20 +73,20 @@ public:
         }
         full_ = false;
 
-        lk.unlock();
+        guard.unlock();
         condProd_.notify_one();
         return true;
     }
 
-    void wake_and_done() {
+    void doneWakeUp() {
         std::unique_lock<std::mutex> guard{mut_};
         done_ = true;
         guard.unlock();
         condCons_.notify_all();
     }
 
-    bool is_empty_and_done() const {
-        std::unique_lock<std::mutex> Lk{mut_};
+    bool emptyAndDone() const {
+        std::unique_lock<std::mutex> guard{mut_};
         return empty_ && done_;
     }
 };

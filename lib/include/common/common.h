@@ -17,13 +17,17 @@
 #include <future>
 #include <iostream>
 #include <sstream>
+#include <string>
 
 using namespace std::chrono_literals;
 
-inline void INFO(const std::string& str = "") {
-    auto myid = std::this_thread::get_id();
-    std::stringstream ss;
-    ss << myid;
-    std::string info = "info: threadID = " + ss.str() + "; " + str + "\n";
-    std::cout << info;
+static std::mutex mtx;
+
+template <typename... Args>
+void INFO(Args&&... args) {
+// let compiler optimize call without side effects
+#ifdef LOG
+    std::lock_guard<std::mutex> lock(mtx);
+    (std::cout << "info: " << ... << std::forward<Args>(args)) << std::endl;
+#endif
 }

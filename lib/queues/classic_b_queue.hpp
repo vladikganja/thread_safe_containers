@@ -1,6 +1,6 @@
 #pragma once
 
-#include <lib/include/common/task.hpp>
+#include <lib/common/task.hpp>
 
 // lock-based bounded queue. One buffer implementation
 template <typename TaskT>

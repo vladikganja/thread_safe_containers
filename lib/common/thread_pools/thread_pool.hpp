@@ -1,6 +1,7 @@
 #pragma once
-#include <lib/include/queues/classic_b_queue.hpp>
-#include <lib/include/queues/lf_b_queue.hpp>
+
+#include <lib/queues/classic_b_queue.hpp>
+#include <lib/queues/lf_b_queue.hpp>
 
 void foo100() {
     std::this_thread::sleep_for(1ms);
@@ -10,8 +11,10 @@ void foo1000() {
     std::this_thread::sleep_for(1000ms);
 }
 
+// Этот тестовый пул потоков призван проверить очереди на работоспособность:
+// на зависания, на потерю задач
 template <typename TaskT, template <typename> class QueueT>
-class ThreadPool {
+class BaseThreadPool {
 protected:
     uint64_t nThreads_;
     uint64_t nTasks_;
@@ -24,22 +27,22 @@ protected:
     bool finished_ = false;
 
 public:
-    ThreadPool(uint64_t nThreads, uint64_t nTastks, QueueT<TaskT>& queue)
+    BaseThreadPool(uint64_t nThreads, uint64_t nTastks, QueueT<TaskT>& queue)
             : nThreads_(nThreads), nTasks_(nTastks), queue_(queue) {
     }
 
-    virtual ~ThreadPool(){};
+    virtual ~BaseThreadPool(){};
 };
 
 template <typename TaskT, template <typename> class QueueT>
-class ProducerPool : public ThreadPool<TaskT, QueueT> {
+class ProducerPool : public BaseThreadPool<TaskT, QueueT> {
 private:
-    using ThreadPool<TaskT, QueueT>::nTasks_;
-    using ThreadPool<TaskT, QueueT>::nThreads_;
-    using ThreadPool<TaskT, QueueT>::taskMut_;
-    using ThreadPool<TaskT, QueueT>::queue_;
-    using ThreadPool<TaskT, QueueT>::threads_;
-    using ThreadPool<TaskT, QueueT>::finished_;
+    using BaseThreadPool<TaskT, QueueT>::nTasks_;
+    using BaseThreadPool<TaskT, QueueT>::nThreads_;
+    using BaseThreadPool<TaskT, QueueT>::taskMut_;
+    using BaseThreadPool<TaskT, QueueT>::queue_;
+    using BaseThreadPool<TaskT, QueueT>::threads_;
+    using BaseThreadPool<TaskT, QueueT>::finished_;
 
     bool check_finish() {
         std::lock_guard<std::mutex> guard{taskMut_};
@@ -75,7 +78,7 @@ private:
 
 public:
     ProducerPool(uint64_t nProducers, uint64_t nTastks, QueueT<TaskT>& queue)
-            : ThreadPool<TaskT, QueueT>(nProducers, nTastks, queue) {
+            : BaseThreadPool<TaskT, QueueT>(nProducers, nTastks, queue) {
     }
 
     ~ProducerPool() override {
@@ -105,14 +108,14 @@ public:
 };
 
 template <typename TaskT, template <typename> class QueueT>
-class ConsumerPool : ThreadPool<TaskT, QueueT> {
+class ConsumerPool : BaseThreadPool<TaskT, QueueT> {
 private:
-    using ThreadPool<TaskT, QueueT>::nTasks_;
-    using ThreadPool<TaskT, QueueT>::nThreads_;
-    using ThreadPool<TaskT, QueueT>::taskMut_;
-    using ThreadPool<TaskT, QueueT>::queue_;
-    using ThreadPool<TaskT, QueueT>::threads_;
-    using ThreadPool<TaskT, QueueT>::finished_;
+    using BaseThreadPool<TaskT, QueueT>::nTasks_;
+    using BaseThreadPool<TaskT, QueueT>::nThreads_;
+    using BaseThreadPool<TaskT, QueueT>::taskMut_;
+    using BaseThreadPool<TaskT, QueueT>::queue_;
+    using BaseThreadPool<TaskT, QueueT>::threads_;
+    using BaseThreadPool<TaskT, QueueT>::finished_;
 
     std::atomic<uint64_t> consumed_{};
 
@@ -151,7 +154,7 @@ private:
 
 public:
     ConsumerPool(uint64_t nConsumers, uint64_t nTasks, QueueT<TaskT>& queue)
-            : ThreadPool<TaskT, QueueT>(nConsumers, nTasks, queue) {
+            : BaseThreadPool<TaskT, QueueT>(nConsumers, nTasks, queue) {
     }
 
     ~ConsumerPool() override {

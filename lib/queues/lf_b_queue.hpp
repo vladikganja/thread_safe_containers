@@ -1,6 +1,6 @@
 #pragma once
 
-#include <lib/include/common/task.hpp>
+#include <lib/common/task.hpp>
 
 template <typename TaskT>
 class LockFreeBQueue_basic {

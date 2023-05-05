@@ -1,9 +1,17 @@
-#include <lib/include/queues/classic_b_queue.hpp>
-#include <lib/include/queues/lf_b_queue.hpp>
-#include <lib/include/common/thread_pool.hpp>
+#include <lib/queues/classic_b_queue.hpp>
+#include <lib/queues/lf_b_queue.hpp>
+#include <lib/common/thread_pools/thread_pool.hpp>
 #include <argparse/argparse.hpp>
+#include <lib/common/quick_sort.hpp>
 
 int main(int argc, char* argv[]) {
+    std::vector<int> a{3, 8, 4, 6, 6, 8, 3, 5, 3, 6, 4, 5, 4, 5, 6, 885, 53, 624, 24, 246, 24, 42, 5, 4, 5, 5, 4, 3, 0};
+
+    bench::quick_sort(2, a.begin(), a.end());
+
+    INFO(a);
+
+    return 0;
     argparse::ArgumentParser parser("ts_conainers");
     parser.add_argument("prod").default_value(1).scan<'i', uint64_t>();
     parser.add_argument("cons").default_value(1).scan<'i', uint64_t>();

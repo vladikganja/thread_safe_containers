@@ -1,6 +1,6 @@
 #pragma once
 
-#include <lib/include/common/common.h>
+#include <lib/common/common.h>
 
 /*
 
@@ -18,6 +18,8 @@ goes out of scope. By using a type-erased unique pointer with a custom deleter, 
 that can work with any type of object, while still ensuring that the object is properly deleted.
 
 */
+
+namespace {
 
 template <typename T>
 class ScaryTaskBase;
@@ -61,6 +63,8 @@ public:
         return static_cast<bool>(ptr_);
     }
 };
+
+} // namespace
 
 using Task = ScaryTaskBase<int()>;
 

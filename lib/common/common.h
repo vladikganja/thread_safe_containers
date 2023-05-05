@@ -18,13 +18,23 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <optional>
+#include <cassert>
 
 using namespace std::chrono_literals;
 
 static std::mutex mtx;
 
+template <typename T>
+std::ostream& operator<<(std::ostream& out, const std::vector<T>& vec) {
+    for (size_t i = 0; i < vec.size(); i++) {
+        out << vec[i] << ' ';
+    }
+    return out;
+}
+
 template <typename... Args>
-void INFO(Args&&... args) {
+inline void INFO(Args&&... args) {
 // let compiler optimize call without side effects
 #ifdef LOG
     std::lock_guard<std::mutex> lock(mtx);

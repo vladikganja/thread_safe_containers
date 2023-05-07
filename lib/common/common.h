@@ -20,6 +20,8 @@
 #include <string>
 #include <optional>
 #include <cassert>
+#include <queue>
+#include <tuple>
 
 using namespace std::chrono_literals;
 
@@ -40,4 +42,14 @@ inline void INFO(Args&&... args) {
     std::lock_guard<std::mutex> lock(mtx);
     (std::cout << "info: " << ... << std::forward<Args>(args)) << std::endl;
 #endif
+}
+
+template <typename... Args>
+inline void REQUIRE(bool cond, Args&&... args) {
+// let compiler optimize call without side effects
+    if (!cond) {
+        std::lock_guard<std::mutex> lock(mtx);
+        (std::cout << "require failed: " << ... << std::forward<Args>(args)) << std::endl;
+        std::abort();
+    }
 }

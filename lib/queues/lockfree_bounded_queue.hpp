@@ -3,7 +3,7 @@
 #include <lib/common/task.hpp>
 
 template <typename TaskT>
-class LockFreeBQueue_basic {
+class LockfreeBoundedQueue {
 private:
     struct Cell {
         std::atomic<uint64_t> sequence;
@@ -16,7 +16,7 @@ private:
     std::atomic<uint64_t> dequeuePos_;
 
 public:
-    LockFreeBQueue_basic(uint64_t size): buffer_(size), bufMask_(size - 1) {
+    LockfreeBoundedQueue(uint64_t size = 1024): buffer_(size), bufMask_(size - 1) {
         for (uint64_t i = 0; i < size; i++) {
             buffer_[i].sequence.store(i);
         }
@@ -25,7 +25,7 @@ public:
         dequeuePos_.store(0);
     }
 
-    bool enqueue(TaskT&& task) {
+    void enqueue(TaskT&& task) {
         Cell* cell;
         uint64_t pos;
         bool res = false;
@@ -37,10 +37,10 @@ public:
             auto seq = cell->sequence.load();
             auto diff = static_cast<int>(seq) - static_cast<int>(pos);
 
-            // queue is full we cannot enqueue and just return false
+            // queue is full we cannot enqueue and just continue
             // another option: queue moved forward all way round
             if (diff < 0) {
-                return false;
+                continue;
             }
 
             // If its Sequence wasn't touched by other producers
@@ -53,7 +53,6 @@ public:
         // write the item we want to enqueue and bump Sequence
         cell->task = std::move(task);
         cell->sequence.store(pos + 1);
-        return true;
     }
 
     bool dequeue(TaskT& task) {

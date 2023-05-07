@@ -4,7 +4,7 @@
 
 // lock-based bounded queue. One buffer implementation
 template <typename TaskT>
-class ClassicBQueue {
+class BlockingBoundedQueue {
 private:
     uint64_t size_{};
 
@@ -26,13 +26,14 @@ private:
     //  b    f
 
 public:
-    ClassicBQueue(): ClassicBQueue(32) {};
-    ClassicBQueue(uint64_t size): buffer_(size) {
+    BlockingBoundedQueue(): BlockingBoundedQueue(32){};
+    BlockingBoundedQueue(uint64_t size): buffer_(size) {
     }
 
     // Some producer sends the data to the queue
     // Then condProd_ waits while buffer is full or skips waiting if it's not full
-    // Then it pushes data to the end of the queue (if enqueuePos_ overtakes frontIdx then the queue is full)
+    // Then it pushes data to the end of the queue (if enqueuePos_ overtakes frontIdx then the queue
+    // is full)
     void enqueue(TaskT&& task) {
         std::unique_lock<std::mutex> guard{mut_};
 

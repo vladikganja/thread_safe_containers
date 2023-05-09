@@ -6,43 +6,29 @@
 #include <lib/queues/lockfree_unbounded_queue.hpp>  // LFU
 #include <lib/queues/waitfree_unbounded_queue.hpp>  // WFU
 
-template <typename TaskT, template <typename> class QueueT>
+#include <lib/queues/uniQueue.hpp>
+
+template <typename TaskT, typename QueueT>
 class ThreadPool {
 private:
     uint64_t nWorkers_;
     volatile std::atomic<uint64_t> maxDepthTasks_;
 
-    QueueT<TaskT> queue_;
+    QueueT queue_;
     std::vector<std::thread> workers_;
 
     std::atomic<bool> allTasksSubmitted_;
 
     void workerRoutine() {
-        if constexpr (std::is_same<QueueT<TaskT>, BlockingBoundedQueue<TaskT>>::value) {
-        } else if constexpr (std::is_same<QueueT<TaskT>, BlockingUnboundedQueue<TaskT>>::value) {
-            while (!allTasksSubmitted_ || !queue_.empty()) {
-                Task t;
-                bool success = queue_.dequeue(t);
-                if (success) {
-                    auto res = std::move(t)();
-                } else {
-                    std::this_thread::yield();
-                }
+        while (!allTasksSubmitted_ || !queue_.empty()) {
+            INFO("workerRoutine ", maxDepthTasks_);
+            Task t;
+            bool success = queue_.dequeue(t);
+            if (success) {
+                auto res = std::move(t)();
+            } else {
+                std::this_thread::yield();
             }
-        } else if constexpr (std::is_same<QueueT<TaskT>, LockfreeBoundedQueue<TaskT>>::value) {
-            while (!allTasksSubmitted_ || !queue_.empty()) {
-                Task t;
-                bool success = queue_.dequeue(t);
-                if (success) {
-                    auto res = std::move(t)();
-                } else {
-                    std::this_thread::yield();
-                }
-            }
-        } else if (std::is_same<QueueT<TaskT>, LockfreeUnboundedQueue<TaskT>>::value) {
-        } else if (std::is_same<QueueT<TaskT>, WaitfreeUnboundedQueue<TaskT>>::value) {
-        } else {
-            assert(false);
         }
     }
 
@@ -57,7 +43,7 @@ private:
 
 public:
     ThreadPool(uint64_t nWorkers, uint64_t maxDepthTasks)
-            : nWorkers_(nWorkers), maxDepthTasks_(maxDepthTasks) {
+            : nWorkers_(nWorkers), maxDepthTasks_(maxDepthTasks), queue_(1024) {
         startWorkers();
     }
 
@@ -79,7 +65,10 @@ public:
             std::this_thread::yield();
         }
 
+        INFO("allTasksSubmitted_");
+
         allTasksSubmitted_.store(true);
+        queue_.wakeUp();
 
         for (auto& worker : workers_) {
             worker.join();

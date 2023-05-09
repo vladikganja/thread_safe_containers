@@ -79,14 +79,14 @@ public:
         return true;
     }
 
-    void doneWakeUp() {
+    void wakeUp() {
         std::unique_lock<std::mutex> guard{mut_};
         done_ = true;
         guard.unlock();
         condCons_.notify_all();
     }
 
-    bool emptyAndDone() const {
+    bool empty() const {
         std::unique_lock<std::mutex> guard{mut_};
         return empty_ && done_;
     }

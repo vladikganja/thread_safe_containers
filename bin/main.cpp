@@ -14,10 +14,6 @@ std::vector<int> generate(uint64_t size) {
 
 int main(int argc, char* argv[]) 
 try {
-    uniQueue<Task, uniQSpec(Base::Array, Bounded::No, Priority::Yes)> queue;
-
-    return 0;
-
     argparse::ArgumentParser parser("ts_conainers");
     parser.add_argument("cores").default_value(1).scan<'i', uint64_t>();
     parser.add_argument("size").default_value(1).scan<'i', uint64_t>();
@@ -29,8 +25,9 @@ try {
 
     //auto start = std::chrono::high_resolution_clock::now();
     bench::quickSort(cores, a.begin(), a.end());
-    //auto end = std::chrono::high_resolution_clock::now();
-    //auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    INFO(a);
+    // auto end = std::chrono::high_resolution_clock::now();
+    // auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
     //INFO(us, " microseconds");
 

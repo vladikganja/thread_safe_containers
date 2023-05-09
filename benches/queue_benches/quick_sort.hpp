@@ -11,7 +11,7 @@ namespace {
 
 namespace impl {
 
-std::optional<ThreadPool<Task, LockfreeBoundedQueue>> pool;
+std::optional<ThreadPool<Task, uniQueue<Task, uniQSpec(Base::Array, Bounded::Yes, Contention::Blocking)>>> pool;
 
 template <typename Ty>
 inline Ty median(Ty val1, Ty val2, Ty val3) {

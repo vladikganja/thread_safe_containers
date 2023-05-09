@@ -16,7 +16,7 @@ private:
     std::atomic<uint64_t> dequeuePos_;
 
 public:
-    LockfreeBoundedQueue(uint64_t size = 1024): buffer_(size), bufMask_(size - 1) {
+    LockfreeBoundedQueue(uint64_t size = 128): buffer_(size), bufMask_(size - 1) {
         for (uint64_t i = 0; i < size; i++) {
             buffer_[i].sequence.store(i);
         }

@@ -345,7 +345,6 @@ private:
             core_;
 
     void lfEnqueue(TaskT&& task) {
-        INFO("lfenqueue");
         Cell<TaskT>* cell;
         uint64_t pos;
         bool res = false;
@@ -366,7 +365,6 @@ private:
             // If its Sequence wasn't touched by other producers
             // check if we can increment the enqueue Position
             if (diff == 0) {
-                INFO("wtf");
                 res = core_.enqueuePos_.compare_exchange_weak(pos, pos + 1);
             }
         }
@@ -547,15 +545,11 @@ public:
     template <uint64_t Mask = SpecMask>
     explicit uniQueue(uint64_t limit, typename std::enable_if_t<isBounded<Mask>::value>* = nullptr)
             : behaveCore_(limit) {
-        INFO("array! limit: ", limit);
-
     }
 
     template <uint64_t Mask = SpecMask>
     uniQueue(typename std::enable_if_t<!isBounded<Mask>::value>* = nullptr)
             : behaveCore_(INIT_SIZE) {
-        INFO("array! no limit");
-
     }
 
     void enqueue(TaskT&& task) {

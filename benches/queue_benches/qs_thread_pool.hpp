@@ -21,7 +21,6 @@ private:
 
     void workerRoutine() {
         while (!allTasksSubmitted_ || !queue_.empty()) {
-            INFO("workerRoutine ", maxDepthTasks_);
             Task t;
             bool success = queue_.dequeue(t);
             if (success) {
@@ -43,7 +42,9 @@ private:
 
 public:
     ThreadPool(uint64_t nWorkers, uint64_t maxDepthTasks)
-            : nWorkers_(nWorkers), maxDepthTasks_(maxDepthTasks), queue_(1024) {
+            : nWorkers_(nWorkers),
+              maxDepthTasks_(maxDepthTasks),
+              queue_((2 << static_cast<uint64_t>(log2(maxDepthTasks)))) {
         startWorkers();
     }
 
@@ -64,8 +65,6 @@ public:
         while (maxDepthTasks_.load() > 0) {
             std::this_thread::yield();
         }
-
-        INFO("allTasksSubmitted_");
 
         allTasksSubmitted_.store(true);
         queue_.wakeUp();

@@ -65,6 +65,5 @@ BENCHMARK_CAPTURE(QuickSortBenchmark, 14, 100'000, 14)->Iterations(1);
 BENCHMARK_CAPTURE(QuickSortBenchmark, 15, 100'000, 15)->Iterations(1);
 BENCHMARK_CAPTURE(QuickSortBenchmark, 16, 100'000, 16)->Iterations(1);
 
-
 // Run the benchmark
 BENCHMARK_MAIN();

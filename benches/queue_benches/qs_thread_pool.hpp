@@ -43,8 +43,9 @@ private:
 public:
     ThreadPool(uint64_t nWorkers, uint64_t maxDepthTasks)
             : nWorkers_(nWorkers),
-              maxDepthTasks_(maxDepthTasks),
-              queue_((2 << static_cast<uint64_t>(log2(maxDepthTasks)))) {
+              maxDepthTasks_(maxDepthTasks)
+              /*,
+              queue_((2 << static_cast<uint64_t>(log2(maxDepthTasks))))*/ {
         startWorkers();
     }
 
@@ -67,7 +68,7 @@ public:
         }
 
         allTasksSubmitted_.store(true);
-        queue_.wakeUp();
+        //queue_.wakeUp();
 
         for (auto& worker : workers_) {
             worker.join();

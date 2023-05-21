@@ -22,6 +22,9 @@
 #include <cassert>
 #include <queue>
 #include <tuple>
+#include <array>
+#include <list>
+#include <algorithm>
 
 using namespace std::chrono_literals;
 

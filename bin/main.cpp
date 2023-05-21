@@ -3,32 +3,32 @@
 
 #include <benches/queue_benches/quick_sort.hpp>
 
-// int main(int argc, char* argv[]) 
-// try {
-//     argparse::ArgumentParser parser("ts_conainers");
-//     parser.add_argument("cores").default_value(1).scan<'i', uint64_t>();
-//     parser.add_argument("size").default_value(1).scan<'i', uint64_t>();
-//     parser.parse_args(argc, argv);
-//     auto cores = parser.get<uint64_t>("cores");
-//     auto size = parser.get<uint64_t>("size");
+int main(int argc, char* argv[]) 
+try {
+    // argparse::ArgumentParser parser("ts_conainers");
+    // parser.add_argument("cores").default_value(1).scan<'i', uint64_t>();
+    // parser.add_argument("size").default_value(1).scan<'i', uint64_t>();
+    // parser.parse_args(argc, argv);
+    // auto cores = parser.get<uint64_t>("cores");
+    // auto size = parser.get<uint64_t>("size");
 
-//     auto a = generate(size);
+    std::vector<int> a{4, 7, 2, 7, 4, 5, 2, 6, 52425, 4, 264, 326};
 
-//     //auto start = std::chrono::high_resolution_clock::now();
-//     bench::quickSort(cores, a.begin(), a.end());
-//     INFO(a);
-//     // auto end = std::chrono::high_resolution_clock::now();
-//     // auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    //auto start = std::chrono::high_resolution_clock::now();
+    bench::quickSort(2, a.begin(), a.end());
+    INFO(a);
+    // auto end = std::chrono::high_resolution_clock::now();
+    // auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
-//     //INFO(us, " microseconds");
+    //INFO(us, " microseconds");
 
-//     return EXIT_SUCCESS;
+    return EXIT_SUCCESS;
 
-// } catch(std::exception& ex) {
-//     INFO(ex.what());
-// } catch(...) {
-//     INFO("undefined error");
-// }
+} catch(std::exception& ex) {
+    INFO(ex.what());
+} catch(...) {
+    INFO("undefined error");
+}
 
 std::vector<int> generate(uint64_t size) {
     std::vector<int> res(size);
@@ -66,4 +66,4 @@ BENCHMARK_CAPTURE(QuickSortBenchmark, 15, 100'000, 15)->Iterations(1);
 BENCHMARK_CAPTURE(QuickSortBenchmark, 16, 100'000, 16)->Iterations(1);
 
 // Run the benchmark
-BENCHMARK_MAIN();
+//BENCHMARK_MAIN();

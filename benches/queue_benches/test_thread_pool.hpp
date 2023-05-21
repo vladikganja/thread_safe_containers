@@ -1,7 +1,6 @@
 #pragma once
 
-#include <lib/queues/classic_b_queue.hpp>
-#include <lib/queues/lf_b_queue.hpp>
+#include <lib/queues/uniQueue.hpp>
 
 void foo100() {
     std::this_thread::sleep_for(1ms);

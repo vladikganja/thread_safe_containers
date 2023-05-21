@@ -3,18 +3,43 @@
 #pragma once
 
 #include <lib/common/task.hpp>
+#include <lib/common/hazard.h>
 
-enum class Base { Array = 0, List = 1, Deque = 2 };
+enum class Base { Array = 0, List = 1 };
 
-enum class Bounded { Yes = 3, No = 4 };
+enum class Bounded { Yes = 2, No = 3 };
 
-enum class Priority { Yes = 5, No = 6 };
+enum class Priority { Yes = 4, No = 5 };
 
-enum class Lifo { Strong = 7, PerThread = 8, BestEffort = 9, No = 10 };
+enum class Contention { Lockfree = 6, Blocking = 7 };
 
-enum class Contention { Waitfree = 11, Lockfree = 12, Blocking = 13 };
+constexpr uint64_t ARRAY = 1;
+constexpr uint64_t LIST = 2;
+constexpr uint64_t BOUNDED = 4;
+constexpr uint64_t UNBOUNDED = 8;
+constexpr uint64_t PRIOR = 16;
+constexpr uint64_t NOTPRIOR = 32;
+constexpr uint64_t LOCKFREE = 64;
+constexpr uint64_t BLOCKING = 128;
+
+// IMPLEMENTED:
+// list lockfree unbounded
+// array blocking bounded
+// array lock-free bounded
+// array blocking bounded priority
 
 namespace {
+
+namespace smr {
+
+static std::array<hp::ThreadLocalHazardManager*, 
+    THREADS_COUNT> globalMaster;
+thread_local hp::ThreadLocalHazardManager 
+    myMaster(globalMaster);
+
+} // smr
+
+namespace inner {
 
 template <typename T, T Begin, class Func, T... Is>
 constexpr void staticForImpl(Func&& f, std::integer_sequence<T, Is...>) noexcept {
@@ -33,13 +58,14 @@ constexpr std::size_t tupleSize(const Tuple&) noexcept {
 
 constexpr uint64_t defaultQSpec() noexcept {
     uint64_t mask = 0;
-    mask |= (1 << static_cast<uint64_t>(Base::Deque));
+    mask |= (1 << static_cast<uint64_t>(Base::List));
     mask |= (1 << static_cast<uint64_t>(Bounded::No));
     mask |= (1 << static_cast<uint64_t>(Priority::No));
-    mask |= (1 << static_cast<uint64_t>(Lifo::Strong));
-    mask |= (1 << static_cast<uint64_t>(Contention::Blocking));
+    mask |= (1 << static_cast<uint64_t>(Contention::Lockfree));
     return mask;
 }
+
+} // inner
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // MASK-TRAITS
@@ -71,11 +97,6 @@ struct isPriority {
 };
 
 template <uint64_t Mask>
-struct isWaitFree {
-    enum { value = static_cast<bool>((1 << static_cast<uint64_t>(Contention::Waitfree)) & Mask) };
-};
-
-template <uint64_t Mask>
 struct isLockFree {
     enum { value = static_cast<bool>((1 << static_cast<uint64_t>(Contention::Lockfree)) & Mask) };
 };
@@ -85,34 +106,163 @@ struct isBlocking {
     enum { value = static_cast<bool>((1 << static_cast<uint64_t>(Contention::Blocking)) & Mask) };
 };
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 } // namespace
 
-//! Base::Deque, Bounded::No, Priority::No, Lifo::Strong, Contention::Blocking
+//! Base::List, Bounded::No, Priority::No, Contention::Lockfree
 template <typename... Args>
 constexpr uint64_t uniQSpec(Args&&... args) noexcept {
     auto tuple = std::make_tuple(std::forward<Args>(args)...);
 
     uint64_t mask = 0;
 
-    staticFor<std::size_t, 0, tupleSize(tuple)>([&](auto i) mutable {
+    inner::staticFor<std::size_t, 0, inner::tupleSize(tuple)>([&](auto i) mutable {
         mask |= (1 << static_cast<uint64_t>(std::get<i>(tuple)));
     });
 
     return mask;
 }
 
-template <typename TaskT, uint64_t SpecMask = defaultQSpec(), typename Enable = void>
-class uniQueue {
+template <typename TaskT, uint64_t SpecMask>
+class uniQueue {};
+
+// Classic Michael-Scott Queue
+template <typename TaskT>
+class uniQueue<TaskT, LIST | UNBOUNDED | LOCKFREE | NOTPRIOR> {
 private:
+    struct Node {
+        std::atomic<Node*> next = nullptr;
+        TaskT task;
+
+        Node() {}
+        Node(TaskT&& task) : task(std::move(task)) {}
+    };
+
+    std::atomic<Node*> head_;
+    std::atomic<Node*> tail_;
+
+// Пример неправильного написания lock-free на C++ ////////////////////////////
+/*
+    void ABAenqueue(TaskT&& task) {
+        std::atomic<Node*> newTail = new Node(std::move(task));
+
+        while (true) {
+            Node* curTail = tail_.load();
+            if (curTail->next.compare_exchange_strong(nullptr, newTail)) {
+                tail_.compare_exchange_strong(curTail, newTail);
+                return;
+            } else {
+                tail_.compare_exchange_strong(curTail, curTail->next.load());
+            }
+        }
+    }
+*/
+///////////////////////////////////////////////////////////////////////////////
 
 public:
-    //! this is not an array implementation, so priority option is impossible
-    static_assert(!isPriority<SpecMask>::value);
-
     uniQueue() {
-        INFO("Not array");
+        Node* sentinel = new Node;
+        head_.store(sentinel, std::memory_order_release);
+        tail_.store(sentinel, std::memory_order_release);
     }
-};
+
+    ~uniQueue() {
+        // Деструктор вызывается главным потоком
+        Node* cur = head_;
+        do {
+            Node* toDel = cur;
+            cur = cur->next;
+            delete toDel;
+        } while (cur->next);
+    }
+
+    void enqueue(TaskT&& task) {
+        Node* newTail = new Node(std::move(task));
+
+        while (true) {
+            Node* curTail = tail_.load(std::memory_order_relaxed);
+
+            // объявление указателя как hazard. HP – thread-private массив
+            smr::myMaster.hptrs[0] = curTail;
+
+            // обязательно проверяем, что tail_ не изменился
+            if (curTail != tail_.load(std::memory_order_acquire)) {
+                continue;
+            }
+
+            Node* next = curTail->next.load();
+
+            if (curTail != tail_.load(std::memory_order_acquire)) {
+                continue;
+            }
+
+            if (next != nullptr) {
+                tail_.compare_exchange_strong(curTail, next, std::memory_order_release);
+                continue; // ?
+            }
+
+            Node* nextNullptr = nullptr;
+            if (curTail->next.compare_exchange_strong(nextNullptr, newTail,
+                                                      std::memory_order_release)) {
+                tail_.compare_exchange_strong(curTail, newTail, std::memory_order_acq_rel);
+                smr::myMaster.hptrs[0] = nullptr; // обнуляем hazard pointer
+                break;
+            }
+        }
+    }
+
+    bool dequeue(TaskT& task) {
+        while (true) {
+            Node* curHead = head_.load(std::memory_order_relaxed);
+            smr::myMaster.hptrs[0] = curHead;
+
+            if (curHead != head_.load(std::memory_order_acquire)) {
+                continue;
+            }
+
+            Node* curTail = tail_.load(std::memory_order_relaxed);
+            Node* next = curHead->next.load(std::memory_order_acquire);
+
+            smr::myMaster.hptrs[1] = next;
+
+            if (curHead != head_.load(std::memory_order_relaxed)) {
+                continue;
+            }
+
+            if (next == nullptr) {
+                smr::myMaster.hptrs[0] = nullptr;
+                return false;
+            }
+
+            if (curHead == curTail) {
+                tail_.compare_exchange_strong(curTail, next, std::memory_order_release);
+                continue;
+            }
+
+            task = std::move(next->task);
+
+            // Есть ненулевая вероятность, что T1 запомнит в регистрах curHead и Next, при этом не успеет
+            // сделать CAS и будет вытеснен планировщиком -> потенциальная ABA.
+            // Но этого не произойдёт, так как, благодаря системе hazard-указателей, 
+            // curHead и next не могли быть отданы аллокатору из других потоков, следовательно, 
+            // не могли быть повторно аллоцированы.
+            if (head_.compare_exchange_strong(curHead, next, std::memory_order_release)) {
+                smr::myMaster.hptrs[0] = nullptr;
+                smr::myMaster.hptrs[1] = nullptr;
+
+                smr::myMaster.RetireNode(curHead);
+                break;
+            }
+        }
+
+        return true;
+    }
+
+    bool empty() const {
+        return head_.load() == tail_.load();
+    }
+ };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // ARRAY-CORE
@@ -284,76 +434,128 @@ public:
     // }
 };
 
-template <typename TaskT, uint64_t Mask, typename Enable = void>
-class ArrayCore {};
-// VECTOR-IMPL          // HEAP-IMPL
-// 34****12             // 4321****
-//  |    |              // |  |
-//  b    f              // f  b
-
-template <typename TaskT, uint64_t Mask>
-class ArrayCore<TaskT, Mask, typename std::enable_if_t<isBlocking<Mask>::value>> {
-public:
-    using ArrayT =
-            std::conditional_t<isPriority<Mask>::value, PriorityQueue<TaskT>, std::vector<TaskT>>;
-
-    ArrayT buffer_;
-    ArrayCore(uint64_t limit) : buffer_(limit) {
-    }
-
+template <typename TaskT>
+class uniQueue<TaskT, ARRAY | BLOCKING | NOTPRIOR | BOUNDED> {
+private:
     uint64_t size_{};
+
     mutable std::mutex mut_;
     std::condition_variable condProd_;
     std::condition_variable condCons_;
+
+    std::vector<TaskT> buffer_;
+
     uint64_t dequeuePos_{};
     uint64_t enqueuePos_{};
+
     bool full_ = false;
     bool empty_ = true;
     bool done_ = false;
+
+    // 34****12
+    //  |    |
+    //  b    f
+
+public:
+    BlockingBoundedQueue(): BlockingBoundedQueue(32){};
+    BlockingBoundedQueue(uint64_t size): buffer_(size) {
+    }
+
+    // Some producer sends the data to the queue
+    // Then condProd_ waits while buffer is full or skips waiting if it's not full
+    // Then it pushes data to the end of the queue (if enqueuePos_ overtakes frontIdx then the queue
+    // is full)
+    void enqueue(TaskT&& task) {
+        std::unique_lock<std::mutex> guard{mut_};
+
+        condProd_.wait(guard, [this] {
+            return !full_;
+        });
+
+        buffer_[enqueuePos_] = std::move(task);
+        enqueuePos_ = (enqueuePos_ + 1) % buffer_.size();
+
+        size_++;
+        if (size_ == buffer_.size()) {
+            full_ = true;
+        }
+        empty_ = false;
+
+        guard.unlock();
+        condCons_.notify_one();
+    }
+
+    bool dequeue(TaskT& task) {
+        std::unique_lock<std::mutex> guard{mut_};
+
+        condCons_.wait(guard, [this] {
+            return !empty_ || done_;
+        });
+
+        if (empty_) {
+            return false;
+        }
+
+        task = std::move(buffer_[dequeuePos_]);
+        dequeuePos_ = (dequeuePos_ + 1) % buffer_.size();
+
+        size_--;
+        if (size_ == 0) {
+            empty_ = true;
+        }
+        full_ = false;
+
+        guard.unlock();
+        condProd_.notify_one();
+        return true;
+    }
+
+    void wakeUp() {
+        std::unique_lock<std::mutex> guard{mut_};
+        done_ = true;
+        guard.unlock();
+        condCons_.notify_all();
+    }
+
+    bool empty() const {
+        std::unique_lock<std::mutex> guard{mut_};
+        return empty_ && done_;
+    }
 };
 
 template <typename TaskT>
-struct Cell {
-    std::atomic<uint64_t> sequence;
-    TaskT task;
-};
+class uniQueue<TaskT, ARRAY | LOCKFREE | NOTPRIOR | BOUNDED> {
+private:
+    struct Cell {
+        std::atomic<uint64_t> sequence;
+        TaskT task;
+    };
 
-template <typename TaskT, uint64_t Mask>
-class ArrayCore<TaskT, Mask, typename std::enable_if_t<isLockFree<Mask>::value>> {
+    std::vector<Cell> buffer_;
+    uint64_t bufMask_;
+    std::atomic<uint64_t> enqueuePos_;
+    std::atomic<uint64_t> dequeuePos_;
+
 public:
-    std::vector<TaskT> buffer_;
+    LockfreeBoundedQueue(uint64_t size = 128): buffer_(size), bufMask_(size - 1) {
+        for (uint64_t i = 0; i < size; i++) {
+            buffer_[i].sequence.store(i, std::memory_order_relaxed);
+        }
 
-    ArrayCore(uint64_t limit): buffer_(limit) {
+        enqueuePos_.store(0, std::memory_order_relaxed);
+        dequeuePos_.store(0, std::memory_order_relaxed);
     }
 
-    uint64_t size_{};
-    uint64_t bufMask_{};
-    std::atomic<uint64_t> dequeuePos_{};
-    std::atomic<uint64_t> enqueuePos_{};
-};
-
-// ARRAY-BASED BOUNDED/UNBOUNDED PRIOR/NOPRIOR BLOCKING/LOCK-FREE
-template <typename TaskT, uint64_t SpecMask>
-class ArrayBehave {
-private:
-    // Priority queue can be only blocking
-    static_assert(!(isPriority<SpecMask>::value && isWaitFree<SpecMask>::value));
-    static_assert(!(isPriority<SpecMask>::value && isLockFree<SpecMask>::value));
-
-    ArrayCore<typename std::conditional_t<isLockFree<SpecMask>::value, Cell<TaskT>, TaskT>,
-              SpecMask>
-            core_;
-
-    void lfEnqueue(TaskT&& task) {
-        Cell<TaskT>* cell;
+    void enqueue(TaskT&& task) {
+        Cell* cell;
         uint64_t pos;
         bool res = false;
 
         while (!res) {
             // fetch the current Position where to enqueue the item
-            pos = core_.enqueuePos_.load();
-            cell = &core_.buffer_[pos & core_.bufMask_];
-            auto seq = cell->sequence.load();
+            pos = enqueuePos_.load(std::memory_order_relaxed);
+            cell = &buffer_[pos & bufMask_];
+            auto seq = cell->sequence.load(std::memory_order_acquire);
             auto diff = static_cast<int>(seq) - static_cast<int>(pos);
 
             // queue is full we cannot enqueue and just continue
@@ -365,25 +567,25 @@ private:
             // If its Sequence wasn't touched by other producers
             // check if we can increment the enqueue Position
             if (diff == 0) {
-                res = core_.enqueuePos_.compare_exchange_weak(pos, pos + 1);
+                res = enqueuePos_.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed);
             }
         }
 
         // write the item we want to enqueue and bump Sequence
         cell->task = std::move(task);
-        cell->sequence.store(pos + 1);
+        cell->sequence.store(pos + 1, std::memory_order_release);
     }
 
-    bool lfDequeue(TaskT& task) {
-        Cell<TaskT>* cell;
+    bool dequeue(TaskT& task) {
+        Cell* cell;
         uint64_t pos;
         bool res = false;
 
         while (!res) {
             // fetch the current Position from where we can dequeue an item
-            pos = core_.dequeuePos_.load();
-            cell = &core_.buffer_[pos & core_.bufMask_];
-            auto seq = cell->sequence.load();
+            pos = dequeuePos_.load(std::memory_order_relaxed);
+            cell = &buffer_[pos & bufMask_];
+            auto seq = cell->sequence.load(std::memory_order_acquire);
             auto diff = static_cast<int>(seq) - static_cast<int>(pos + 1);
 
             // probably the queue is empty, then return false
@@ -394,177 +596,47 @@ private:
             // Check if its Sequence was changed by a producer and wasn't changed by
             // other consumers and if we can increment the dequeue Position
             if (diff == 0) {
-                res = core_.dequeuePos_.compare_exchange_weak(pos, pos + 1);
+                res = dequeuePos_.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed);
             }
         }
 
         // read the item and update for the next round of the buffer
         task = std::move(cell->task);
-        cell->sequence.store(pos + core_.bufMask_ + 1);
+        cell->sequence.store(pos + bufMask_ + 1, std::memory_order_release);
         return true;
-    }
-
-    // mess because of my brain is bleeding after 20 hours of sfinae
-    void blkUnbounded(TaskT&& task) {
-        if (core_.size_ == core_.buffer_.size()) {
-            core_.buffer_.resize(core_.size_ * 2);
-        }
-        core_.buffer_[core_.enqueuePos_] = std::move(task);
-        core_.enqueuePos_++;
-    }
-
-    void blkBounded(TaskT&& task) {
-        if constexpr (isPriority<SpecMask>::value) {
-            core_.buffer_.push(std::move(task));
-        } else {
-            core_.buffer_[core_.enqueuePos_] = std::move(task);
-            core_.enqueuePos_ = (core_.enqueuePos_ + 1) % core_.buffer_.size();
-        }
-
-        core_.size_++;
-        if (core_.size_ == core_.buffer_.size()) {
-            core_.full_ = true;
-        }
-        core_.empty_ = false;
-    }
-
-    void blkEnqueue(TaskT&& task) {
-        std::unique_lock<std::mutex> guard{core_.mut_};
-
-        if constexpr (isBounded<SpecMask>::value) {
-            core_.condProd_.wait(guard, [this] {
-                return !core_.full_;
-            });
-
-            blkBounded(std::move(task));
-
-            guard.unlock();
-            core_.condCons_.notify_one();
-        } else if (isUnbounded<SpecMask>::value) {
-            blkUnbounded(std::move(task));
-        }
-    }
-
-    bool blkDequeue(TaskT& task) {
-        std::unique_lock<std::mutex> guard{core_.mut_};
-        // PRIORITY !!! TODO
-        if constexpr (isBounded<SpecMask>::value) {
-            core_.condCons_.wait(guard, [this] {
-                return !core_.empty_ || core_.done_;
-            });
-
-            if (core_.empty_) {
-                return false;
-            }
-
-            task = std::move(core_.buffer_[core_.dequeuePos_]);
-            core_.dequeuePos_ = (core_.dequeuePos_ + 1) % core_.buffer_.size();
-
-            core_.size_--;
-            if (core_.size_ == 0) {
-                core_.empty_ = true;
-            }
-            core_.full_ = false;
-
-            guard.unlock();
-            core_.condProd_.notify_one();
-        } else if (isUnbounded<SpecMask>::value) {
-
-        }
-
-        return true;
-    }
-
-    void doneWakeUp() {
-        std::unique_lock<std::mutex> guard{core_.mut_};
-        core_.done_ = true;
-        guard.unlock();
-        core_.condCons_.notify_all();
-    }
-
-    bool emptyAndDone() const {
-        std::unique_lock<std::mutex> guard{core_.mut_};
-        return core_.empty_ && core_.done_;
-    }
-
-public:
-
-    ArrayBehave(uint64_t limit) : core_(limit) {
-        if constexpr (isLockFree<SpecMask>::value) {
-            for (uint64_t i = 0; i < limit; i++) {
-                core_.buffer_[i].sequence.store(i);
-            }
-
-            core_.enqueuePos_.store(0);
-            core_.dequeuePos_.store(0);
-
-            core_.bufMask_ = limit - 1;
-        }
-    }
-
-    void enqueue(TaskT&& task) {
-        if constexpr (isLockFree<SpecMask>::value) {
-            lfEnqueue(std::move(task));
-        } else {
-            blkEnqueue(std::move(task));
-        }
-    }
-
-    bool dequeue(TaskT& task) {
-        if constexpr (isLockFree<SpecMask>::value) {
-            return lfDequeue(task);
-        } else {
-            return blkDequeue(task);
-        }
     }
 
     bool empty() const {
-        if constexpr (isLockFree<SpecMask>::value) {
-            return core_.enqueuePos_.load() == core_.dequeuePos_.load();
-        } else {
-            return emptyAndDone();
-        }
-    }
-
-    void wakeUp() {
-        if constexpr (isBlocking<SpecMask>::value) {
-            doneWakeUp();
-        }
+        return enqueuePos_.load() == dequeuePos_.load();
     }
 };
 
-template <typename TaskT, uint64_t SpecMask>
-class uniQueue<TaskT, SpecMask, typename std::enable_if<isArray<SpecMask>::value>::type> {
+template <typename TaskT>
+class uniQueue<TaskT, ARRAY | BLOCKING | NOTPRIOR | UNBOUNDED> {
 private:
-    static constexpr uint64_t INIT_SIZE = 32;
-    ArrayBehave<TaskT, SpecMask> behaveCore_;
+    mutable std::mutex mut_;
+    std::queue<TaskT, std::deque<TaskT>> queue_;
 
 public:
-    static constexpr uint64_t spec = SpecMask;
-
-    template <uint64_t Mask = SpecMask>
-    explicit uniQueue(uint64_t limit, typename std::enable_if_t<isBounded<Mask>::value>* = nullptr)
-            : behaveCore_(limit) {
-    }
-
-    template <uint64_t Mask = SpecMask>
-    uniQueue(typename std::enable_if_t<!isBounded<Mask>::value>* = nullptr)
-            : behaveCore_(INIT_SIZE) {
-    }
-
     void enqueue(TaskT&& task) {
-        behaveCore_.enqueue(std::move(task));
+        std::lock_guard<std::mutex> guard{mut_};
+        queue_.push(std::move(task));
     }
 
     bool dequeue(TaskT& task) {
-        return behaveCore_.dequeue(task);
+        std::unique_lock<std::mutex> guard{mut_};
+
+        if (queue_.empty()) {
+            return false;
+        }
+
+        task = std::move(queue_.front());
+        queue_.pop();
+
+        return true;
     }
 
     bool empty() const {
-        return behaveCore_.empty();
-    }
-
-    void wakeUp() {
-        behaveCore_.wakeUp();
+        return queue_.empty();
     }
 };
